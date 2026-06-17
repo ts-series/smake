@@ -24,10 +24,10 @@ jobs:
             name: smake-windows-x64.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: denoland/setup-deno@v2
       - run: deno compile --allow-read --allow-write --allow-env --allow-ffi --target ${{ matrix.target }} --output dist/${{ matrix.name }} src/cli.ts
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.name }}
           path: dist/${{ matrix.name }}
@@ -38,13 +38,13 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           path: dist
       - run: |
           mkdir release
           find dist -type f -exec mv {} release/ \;
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: release/*
           generate_release_notes: true

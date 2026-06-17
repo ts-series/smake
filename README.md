@@ -32,7 +32,7 @@ Execute portfolio.sql on ../../../../.local/share/…/portfolio.db
 
 SQL scripts can also call user-defined functions implemented in TypeScript, as well as a set of built-in functions for common tasks such as reading files or converting timestamps.
 
-Optionally, SMake can extract metadata from built databases and generate TypeScript ORM classes from them, including type definitions and Zod validation schemas derived from the same source. The generated classes target [Lite.ts](https://github.com/thyringer/lite-ts), a lightweight, connector-agnostic ORM for SQLite.
+Optionally, SMake can extract metadata from built databases and generate TypeScript ORM classes from them, including type definitions and Zod validation schemas derived from the same source. The generated classes target [Lite.ts](https://github.com/ts-series/lite), a lightweight, connector-agnostic ORM for SQLite.
 
 ### Automated Constraint Injection
 
@@ -40,40 +40,65 @@ SMake streamlines schema maintenance by automatically injecting check constraint
 
 Additionally, the generated ORM utilizes these same definitions to synchronize type definitions and Zod schemas in TypeScript with the database constraints, providing a unified source of truth for both the persistence and application layers.
 
-## License
-
-This software is released into the public domain under [The Unlicense](http://unlicense.org/).
-
 ## Installation
 
-SMake requires [Deno](https://deno.com) to be installed. Clone or download the repository, then compile a self-contained executable with:
+There are three ways to install SMake.
+
+### With JSR
+
+If you have [Deno](https://deno.com) installed:
 
 ```sh
-deno compile --allow-read --allow-write --allow-env --allow-ffi --output dist/smake modules/cli.ts
+deno install -A -g jsr:@ts-series/smake
+```
+
+This installs the `smake` binary globally on your `PATH`.
+
+### Precompiled binary
+
+Download the binary for your platform from the [latest release](https://github.com/ts-series/smake/releases/latest), then make it executable and place it on your `PATH`.
+
+#### Linux
+
+```sh
+curl -L -o smake https://github.com/ts-series/smake/releases/latest/download/smake-linux-x64
+chmod +x smake
+mv smake ~/.local/bin/
+```
+
+#### macOS
+
+```sh
+curl -L -o smake https://github.com/ts-series/smake/releases/latest/download/smake-macos-x64
+chmod +x smake
+mv smake ~/.local/bin/
+```
+
+On Apple Silicon, use `smake-macos-arm64` instead.
+
+#### Windows
+
+Download `smake-windows-x64.exe` from the [latest release](https://github.com/ts-series/smake/releases/latest), rename it to `smake.exe`, and place it in any directory listed in your `PATH` environment variable.
+
+### From source
+
+Clone or download the repository, then compile a self-contained executable with:
+
+```sh
+deno compile --allow-read --allow-write --allow-env --allow-ffi --output dist/smake src/cli.ts
 ```
 
 or just:
 
 ```sh
-deno run compile
+deno task compile
 ```
 
 The resulting binary bundles all dependencies and can be placed anywhere on your `PATH`; for example under `~/.local/bin` with:
 
 ```sh
-deno run install
+deno task install
 ```
-
-### Linux
-
-```sh
-chmod +x smake
-mv smake ~/.local/bin/
-```
-
-### Windows
-
-Place `smake.exe` in any directory listed in your `PATH` environment variable.
 
 ## Usage
 
@@ -100,4 +125,8 @@ To create a sample configuration file (`smake.json`) and an example SQL script (
 smake example
 ```
 
-Full documentation is available in [REFERENCE.md](https://github.com/thyringer/smake/blob/main/REFERENCE.md).
+Full documentation is available in [REFERENCE.md](https://github.com/ts-series/smake/blob/main/REFERENCE.md).
+
+## License
+
+This software is released into the public domain under [The Unlicense](http://unlicense.org/).
