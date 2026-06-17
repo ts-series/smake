@@ -21,7 +21,7 @@ Options:
 
 export const ExampleBuild = `{
 	"orm": {
-		"directory": "./orm/example.ts",
+		"directory": "./orm",
 		"libraryPath": "litets",
 		"includingViews": true,
 		"tableNaming": "PascalCase",
@@ -30,7 +30,7 @@ export const ExampleBuild = `{
 	"databases": {
 		"example.db": {
 			"strict": true,
-			"metadata": ".metadata/example.json",
+			"metadata": "./metadata/example.json",
 			"schemaName": "Example",
 			"functions": [],
 			"scripts": [
