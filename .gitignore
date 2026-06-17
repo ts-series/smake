@@ -1,0 +1,13 @@
+.deno/
+.env
+.vscode/
+bin/
+deno.lock
+
+# DATABASE FILES
+*.db*
+
+# GENERATED TEST DATA
+test/*
+!test/smake.json
+!test/example*.sql

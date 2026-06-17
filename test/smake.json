@@ -1,0 +1,28 @@
+{
+	"types": "./custom-types.json",
+	"orm": {
+		"directory": "./orm/",
+		"libraryPath": "litets",
+		"includingViews": true,
+		"tableNaming": "PascalCase",
+		"columnNaming": "camelCase"
+	},
+	"databases": {
+		"example1.db": {
+			"strict": true,
+			"metadata": ".metadata/example1.json",
+			"prefix": "Example1",
+			"scripts": [
+				"example1a.sql",
+				"example1b.sql"
+			]
+		},
+		"example2.db": {
+			"strict": true,
+			"metadata": ".metadata/example2.json",
+			"scripts": [
+				"example2.sql"
+			]
+		}
+	}
+}
