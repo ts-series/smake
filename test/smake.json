@@ -1,23 +1,23 @@
 {
 	"types": "./custom-types.json",
 	"orm": {
-		"directory": "./orm/",
+		"directory": "./modules/",
 		"libraryPath": "litets",
 		"includingViews": true,
 		"tableNaming": "PascalCase",
 		"columnNaming": "camelCase"
 	},
 	"databases": {
-		"example1.db": {
+		"databases/example1.db": {
 			"strict": true,
 			"metadata": ".metadata/example1.json",
-			"prefix": "Example1",
+			"schemaName": "Example1",
 			"scripts": [
 				"example1a.sql",
 				"example1b.sql"
 			]
 		},
-		"example2.db": {
+		"databases/example2.db": {
 			"strict": true,
 			"metadata": ".metadata/example2.json",
 			"scripts": [

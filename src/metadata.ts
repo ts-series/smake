@@ -1,6 +1,6 @@
 
 import { Database } from "sqlite";
-import { dirname, fromFileUrl } from "std/path";
+import { basename, dirname, extname, fromFileUrl, join } from "std/path";
 
 import { bold, ErrorDisplay, grey, indent, printSqlError, WarningDisplay } from "./formatting.ts";
 import { Affinity, CustomTypes, Domain } from "./preparing.ts";

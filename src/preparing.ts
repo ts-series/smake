@@ -1,5 +1,5 @@
 
-import { resolve } from "std/path"
+import { join, resolve } from "std/path"
 import { z } from "zod";
 
 import { ErrorDisplay } from "./formatting.ts";
@@ -128,18 +128,26 @@ export type Orm = z.infer<typeof OrmSchema>;
 
 
 const BuildSchema = z.object({
-	source: z.string().optional(),
-		// Path to an existing database to be copied and modified.
-	strict: z.boolean().default(true),
-		// Should foreign key constraints be enabled?
-	metadata: z.string().optional(),
-		// If a path is specified, the metadata will be exported there (e.g., for third-party software).
 	schemaName: z.string().optional(),
 		// Name of the DB for cross-database joins.
+	source: z.string().optional(),
+		// Path to an existing database to be copied and modified.
+	strict: z.boolean().optional(),
+		// Should foreign key constraints be enabled? Falls back to the global setting, then to true.
 	functions: z.array(z.string()).optional().default([]),
 		// TypeScript modules containing custom functions to be available in SQLite during SMake creation.
-	scripts: z.array(z.string())
+	scripts: z.array(z.string()),
 		// List of source files executed sequentially on this database.
+	ormTypes: z.record(z.string(), z.record(z.string(), z.string())).optional(),
+		// Custom types that only exist in the ORM without constraint injections and take precedence over specifications in the SQL code.
+	production: z.string().optional(),
+		// Path to the live database to be modified directly when releasing.
+	backup: z.boolean().default(true),
+		// Should a timestamped copy of the production database be created before release?
+	backupDirectory: z.string().optional(),
+		// Target directory for the backup copy; defaults to the directory of 'production'.
+	metadata: z.string().optional()
+		// If a path is specified, the metadata will be exported there (e.g., for third-party software).
 });
 
 export type Build = z.infer<typeof BuildSchema>;
@@ -147,7 +155,13 @@ export type Build = z.infer<typeof BuildSchema>;
 
 const ConfigSchema = z.object({
 	types: z.string().optional(),
+		// Path to a JSON file where custom types are precisely specified, from which check constraints and TS types are generated.
 	orm: OrmSchema.optional(),
+		// Specifications for generating the ORM.
+	strict: z.boolean().optional(),
+		// Global default for whether foreign key constraints are enabled, overridable per database.
+	directory: z.string().optional(),
+		// If set, every database key resolves relative to this directory instead of being an absolute path itself.
 	databases: z.record(z.string(), BuildSchema)
 });
 
@@ -187,8 +201,9 @@ export function readConfig(): Config {
 	try {
 		raw = JSON.parse(text);
 	}
-	catch {
-		console.error(ErrorDisplay("Build file 'smake.json' is not valid JSON."));
+	catch (e) {
+		const msg = e instanceof Error ? e.message : String(e);
+		console.error(ErrorDisplay(`Build file 'smake.json' is not valid JSON: ${msg}`));
 		Deno.exit(1);
 	}
 
@@ -221,7 +236,7 @@ export function readConfig(): Config {
 
 	const databases: Builds = new Map();
 	for (const [key, val] of Object.entries(result.data.databases)) {
-		databases.set(resolvePath(key), val);
+		databases.set(resolvePath(result.data.directory ? join(result.data.directory, key) : key), val);
 	}
 
 	if (result.data.orm) result.data.orm.indent = resolveIndent(result.data.orm.indent);

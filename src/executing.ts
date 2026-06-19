@@ -1,20 +1,24 @@
 
-import { basename, dirname, extname } from "std/path"
+import { basename, dirname, extname, join } from "std/path"
 import { ensureDirSync } from "std/fs"
 import { Database } from "sqlite"
 
 import { Builds, resolvePath, CustomTypes, CustomTypesSchema, Config } from "./preparing.ts";
 import { AppliedTypes, parseSql, RelationKinds, RelationStatements, Statement, StatementKind } from "./parsing.ts";
-import { ErrorDisplay, getPathDisplay, grey, printSqlError, red, WarningDisplay } from "./formatting.ts";
+import { bold, ErrorDisplay, getPathDisplay, grey, printSqlError, red, WarningDisplay } from "./formatting.ts";
 import { exportMetadata, extractMetadata } from "./metadata.ts";
 import { exportClasses, exportTypes, toPascalCase, TypesMap } from "./orm.ts";
 import { registerFunctions } from "./functions.ts";
 
 
-// DATABASE OPERATIONS
+// BUILD COMMAND
 
 /** Processes all builds: creates databases and executes SQL scripts statement by statement. */
-export async function createBuilds(config: Config): Promise<void> {
+export async function createBuilds(
+	config: Config,
+	release: boolean = false,
+	names?: string[]
+): Promise<void> {
 	let customTypes: CustomTypes = {};
 	let typesMap: TypesMap = {}
 
@@ -24,7 +28,7 @@ export async function createBuilds(config: Config): Promise<void> {
 		try {
 			customTypes = CustomTypesSchema.parse(JSON.parse(Deno.readTextFileSync(path)));
 			console.log(`Load ${Object.keys(customTypes).length} types`);
-			if (config.orm) typesMap = exportTypes(customTypes, config.orm);
+			if (!release && config.orm) typesMap = exportTypes(customTypes, config.orm);
 		}
 		catch (e) {
 			if (e instanceof Deno.errors.NotFound) {
@@ -34,40 +38,59 @@ export async function createBuilds(config: Config): Promise<void> {
 				console.error(ErrorDisplay(`Permission denied: ${path}`));
 			}
 			else if (e instanceof SyntaxError) {
-				console.error(ErrorDisplay(`Malformed JSON in types file: ${path}`));
+				console.error(ErrorDisplay(`Malformed JSON in types file: ${path}\n${e.message}`));
 			}
 			throw e;
 		}
 	}
 
 	for (const [dbPath, build] of config.databases) {
-		const dbName = basename(dbPath, extname(dbPath));
+		if (names && !names.includes(basename(dbPath, extname(dbPath)))) continue;
+
+		if (release && !build.production) {
+			console.warn(WarningDisplay(`No 'production' path configured, skipping: ${getPathDisplay(dbPath)}`));
+			continue;
+		}
+
+		const targetPath = release ? resolvePath(build.production!) : dbPath;
+		const dbName = basename(targetPath, extname(targetPath));
 		const schemaName = build.schemaName || toPascalCase(dbName);
-		const dbPathDisplay = getPathDisplay(dbPath);
+		const dbPathDisplay = getPathDisplay(targetPath);
 
 		console.log();
-		ensureDirSync(dirname(dbPath));
+		ensureDirSync(dirname(targetPath));
+
+		if (release && build.backup) {
+			backupDatabase(targetPath, build.backupDirectory);
+		}
 
 		// 1 Prepare database and establish a connection:
 		if (build.source) {
-			const basePath = resolvePath(build.source);
-			if (basePath === dbPath) {
-				console.warn(WarningDisplay(`base and destination are the same path, skipping: ${dbPathDisplay}`));
-				continue;
+			if (release) {
+				console.log(`Open existing production database ${dbPathDisplay}`);
 			}
-			Deno.copyFileSync(basePath, dbPath);
-			console.log(`Copy ${getPathDisplay(basePath)} to ${dbPathDisplay}`);
+			else {
+				const basePath = resolvePath(build.source);
+				if (basePath === targetPath) {
+					console.warn(WarningDisplay(`base and destination are the same path, skipping: ${dbPathDisplay}`));
+					continue;
+				}
+				Deno.copyFileSync(basePath, targetPath);
+				console.log(`Copy ${getPathDisplay(basePath)} to ${dbPathDisplay}`);
+			}
 		}
 		else {
 			try {
-				Deno.removeSync(dbPath);
+				Deno.removeSync(targetPath);
 				console.log(red(`Remove existing database ${dbPathDisplay}`));
 			}
 			catch { /* not found */ }
 		}
 
-		const db = new Database(dbPath);
-		if (build.strict) db.exec("PRAGMA foreign_keys = ON;");
+		const db = new Database(targetPath);
+		const strict = build.strict ?? config.strict ?? true;
+
+		if (strict) db.exec("PRAGMA foreign_keys = ON;");
 		if (build.functions) await registerFunctions(db, build.functions.map(resolvePath));
 
 		// 2 Create additional metatables as needed and import column annotations:
@@ -79,17 +102,52 @@ export async function createBuilds(config: Config): Promise<void> {
 			await runScript(db, scriptStr, dbPathDisplay, relationStatements, customTypes, appliedTypes);
 		}
 
-		// 4 Export metadata and ORM when required:
+		// 4 Apply manual ORM-only type overrides on top of the parsed annotations:
+		if (build.ormTypes) {
+			for (const [table, cols] of Object.entries(build.ormTypes)) {
+				appliedTypes[table] = { ...appliedTypes[table], ...cols };
+			}
+		}
+
+		// 5 Export metadata and ORM when required:
 		console.log(`Validate views on database ${dbPathDisplay}`);
 
 		const metadata = extractMetadata(
 			db, dbName, schemaName, relationStatements, customTypes, appliedTypes);
 		//console.log(`metadata = ${JSON.stringify(metadata)}`);
 
-		if (build.metadata) exportMetadata(metadata, resolvePath(build.metadata));
-		if (config.orm) exportClasses(metadata, config.orm, typesMap);
-
+		if (!release) {
+			if (build.metadata) exportMetadata(metadata, resolvePath(build.metadata));
+			if (config.orm) exportClasses(metadata, config.orm, typesMap);
+		}
+		
 		db.close();
+
+		// 6 Caches applied custom types as JSON next to the database:
+		const cachePath = join(dirname(targetPath), `${basename(targetPath, extname(targetPath))}.json`);
+		Deno.writeTextFileSync(cachePath, JSON.stringify(appliedTypes, null, "\t"));
+		console.log(`Cache applied types to ${bold(cachePath)}`);
+	}
+}
+
+
+/** Creates a timestamped backup copy of the production database before modification. */
+function backupDatabase(targetPath: string, backupDirectory: string | undefined): void {
+	try {
+		const dir = backupDirectory ? resolvePath(backupDirectory) : dirname(targetPath);
+		ensureDirSync(dir);
+
+		const name = basename(targetPath, extname(targetPath));
+		const backupPath = join(dir, `${name}.${Date.now()}${extname(targetPath)}`);
+
+		Deno.copyFileSync(targetPath, backupPath);
+		console.log(`Backup ${getPathDisplay(targetPath)} to ${getPathDisplay(backupPath)}`);
+	}
+	catch (e) {
+		if (e instanceof Deno.errors.NotFound) {
+			console.log(grey(`No existing production database to back up at ${getPathDisplay(targetPath)}`));
+		}
+		else throw e;
 	}
 }
 
@@ -136,137 +194,68 @@ async function runScript(
 }
 
 
-// READING JSON INSTEAD OF SQL
+// ORM COMMAND
 
-interface TargetTable {
-	name: string;
-	key: string[];
-	data: string[];
-}
-
-
-/** Imports data from a JSON file into the database, supporting keyed objects and metadata headers. */
-function insertFromJson(db: Database, jsonPath: string, targetTable: TargetTable | string | null = null) {
-	let fileData: any;
-	const pathDisplay = getPathDisplay(jsonPath);
-
-	try {
-		fileData = JSON.parse(Deno.readTextFileSync(jsonPath));
-	}
-	catch (e) {
-		const msg = e instanceof Error ? e.message : String(e);
-		console.log("───");
-		console.error(ErrorDisplay(`Failed to parse ${pathDisplay}: ${msg}`));
+/** Regenerates ORM classes for all configured databases from existing files, without running scripts. */
+export async function regenerateOrm(config: Config): Promise<void> {
+	if (!config.orm) {
+		console.error(ErrorDisplay("No 'orm' configuration found in smake.json"));
 		Deno.exit(1);
 	}
 
-	if (Array.isArray(fileData)) {
-		if (!targetTable) {
-			console.error(ErrorDisplay(
-				`${pathDisplay} is JSON array, but no specified target table`));
-		}
-		else {
-			const tableName = typeof targetTable === "string" ? targetTable : targetTable.name;
-			console.log(
-				`Import ${fileData.length} records into ${tableName}`);
-			insertRows(db, tableName, fileData);
-		}
+	let customTypes: CustomTypes = {};
+	let typesMap: TypesMap = {}
+
+	if (config.types) {
+		const path = resolvePath(config.types);
+		customTypes = CustomTypesSchema.parse(JSON.parse(Deno.readTextFileSync(path)));
+		typesMap = exportTypes(customTypes, config.orm);
 	}
-	else if (typeof fileData === "object" && fileData !== null) {
-		const isTargetObj = targetTable && typeof targetTable === "object";
-		
-		if (isTargetObj || fileData.table) {
-			const { table, ...records } = isTargetObj ? { table: targetTable, ...fileData } : fileData;
-			const { name, key, data } = table;
-		
-			if (!name || !Array.isArray(key) || !Array.isArray(data)) {
-				console.error(ErrorDisplay(
-					`Invalid table metadata in ${pathDisplay} or argument; 'name', 'key' and 'data' required.`));
-				return;
-			}
-		
-			const columns = [...key, ...data];
-			const rows: any[][] = [];
-		
-			for (const [k, val] of Object.entries(records)) {
-				const keyParts = k.split(",");
-				const attrParts = Array.isArray(val) ? val : [val];
-				rows.push([...keyParts, ...attrParts]);
-			}
-		
-			console.log(
-				`Import ${rows.length} records into ${name}`);
-			insertRows(db, name, rows, columns);
+
+	for (const [dbPath, build] of config.databases) {
+		const dbName = basename(dbPath, extname(dbPath));
+		const schemaName = build.schemaName || toPascalCase(dbName);
+		const dbPathDisplay = getPathDisplay(dbPath);
+
+		console.log();
+
+		let db: Database;
+
+		try {
+			db = new Database(dbPath, { readonly: true });
 		}
-		else {
-			for (const [tableName, rows] of Object.entries(fileData)) {
-				if (Array.isArray(rows)) {
-					console.log(
-						`Import ${rows.length} records into ${tableName}`);
-					insertRows(db, tableName, rows);
-				}
+		catch {
+			console.warn(WarningDisplay(`Database not found, skipping: ${dbPathDisplay}`));
+			continue;
+		}
+
+		console.log(`Read metadata from ${dbPathDisplay}`);
+
+		const appliedTypes = readAppliedTypes(dbPath);
+
+		if (build.ormTypes) {
+			for (const [table, cols] of Object.entries(build.ormTypes)) {
+				appliedTypes[table] = { ...appliedTypes[table], ...cols };
 			}
 		}
+
+		const metadata = extractMetadata(db, dbName, schemaName, {}, customTypes, appliedTypes);
+
+		exportClasses(metadata, config.orm, typesMap);
+
+		db.close();
 	}
 }
 
 
-/** Helper to insert mixed arrays, objects, or scalars into a table. */
-function insertRows(db: Database, tableName: string, rows: any[], columns?: string[]) {
-	if (rows.length === 0) return;
+/** Reads a previously cached applied-types JSON file next to the database, if present. */
+export function readAppliedTypes(dbPath: string): AppliedTypes {
+	const cachePath = join(dirname(dbPath), `${basename(dbPath, extname(dbPath))}.json`);
 
-	const statementCache = new Map<string, any>();
-
-	for (const row of rows) {
-		let sql: string;
-		let values: any[];
-
-		if (columns && Array.isArray(row)) {
-			// Case A1: Array + Explicit Column Names (Metadata Header Case)
-			const colList = columns.join(", ");
-			const placeholders = new Array(columns.length).fill("?").join(", ");
-			sql = `INSERT INTO ${tableName} (${colList}) VALUES (${placeholders})`;
-			values = row;
-		}
-		else if (Array.isArray(row)) {
-			// Case A2: Positional mapping
-			const placeholders = new Array(row.length).fill("?").join(", ");
-			sql = `INSERT INTO ${tableName} VALUES (${placeholders})`;
-			values = row;
-		}
-		else if (typeof row === "object" && row !== null) {
-			// Case B: Named keys
-			const keys = Object.keys(row);
-			const colList = keys.join(", ");
-			const placeholders = new Array(keys.length).fill("?").join(", ");
-			sql = `INSERT INTO ${tableName} (${colList}) VALUES (${placeholders})`;
-			values = keys.map(k => row[k]);
-		}
-		else {
-			// Case C: Scalar
-			sql = `INSERT INTO ${tableName} VALUES (?)`;
-			values = [row];
-		}
-
-		try {
-			if (!statementCache.has(sql)) {
-				statementCache.set(sql, db.prepare(sql));
-			}
-			
-			const stmt = statementCache.get(sql);
-			const params = values.map(v => 
-				(typeof v === "object" && v !== null) ? JSON.stringify(v) : v
-			);
-
-			stmt.run(...params);
-		}
-		catch (e) {
-			const msg = e instanceof Error ? e.message : String(e);
-			const snippet = JSON.stringify(row).substring(0, 100);
-			console.log("───");
-			console.error(ErrorDisplay(msg));
-			console.log(grey(`${snippet}${snippet.length >= 100 ? "..." : ""}`));
-			console.log();
-		}
+	try {
+		return JSON.parse(Deno.readTextFileSync(cachePath)) as AppliedTypes;
+	}
+	catch {
+		return {};
 	}
 }

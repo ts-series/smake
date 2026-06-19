@@ -275,7 +275,7 @@ export function parseSql(
 // COLUMN SPECIFICATION
 
 /** Injects generated constraints into a CREATE TABLE statement. */
-export function injectConstraints(stmt: Statement, customTypes: CustomTypes): [Statement, ColumnTypes] {
+function injectConstraints(stmt: Statement, customTypes: CustomTypes): [Statement, ColumnTypes] {
 	const [modStmt, colTypes] = resolveCustomTypes(stmt, customTypes);
 
 	const constraints = generateConstraints(modStmt.id!, colTypes, customTypes);

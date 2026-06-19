@@ -2,13 +2,13 @@
 import { parseArgs } from "std/cli/parse-args"
 
 import { ExampleBuild, ExampleSql, Help } from "./templates.ts";
-import { createBuilds } from "./executing.ts";
+import { createBuilds, regenerateOrm } from "./executing.ts";
 import { readConfig } from "./preparing.ts";
 
 
 //
 
-const Version = "1.1";
+const Version = "2.1";
 
 
 /** Entry point: dispatches CLI subcommands or runs the default build. */
@@ -23,32 +23,40 @@ async function program(): Promise<void> {
 	switch (cmd) {
 		case "?":
 		case "h":
-		case "help":
+		case "help": {
 			console.log(Help);
 			break;
+		}
 		case "v":
-		case "version":
+		case "version": {
 			console.log(Version);
 			break;
-		case "example":
+		}
+		case "example": {
 			Deno.writeTextFileSync("smake.json", ExampleBuild);
 			Deno.writeTextFileSync("example.sql", ExampleSql);
 			console.log("Created smake.json and example.sql");
 			break;
-		/*
-		case "only":
-			if (args._[1] === "metatables") {
-				Deno.writeTextFileSync("metatables.sql", Metatables);
-				console.log("Created metatables.sql");
-			}
+		}
+		case "orm": {
+			regenerateOrm(readConfig());
 			break;
-		*/
-		case undefined:
-			createBuilds(readConfig());
+		}
+		case "release": {
+			const names = args._.slice(1).map(String);
+			createBuilds(readConfig(), true, names.length > 0 ? names : undefined);
 			break;
-		default:
+		}
+		case "build":
+		case undefined: {
+			const names = args._.slice(1).map(String);
+			createBuilds(readConfig(), false, names.length > 0 ? names : undefined);
+			break;
+		}
+		default: {
 			console.error(`\x1b[91m[ERROR]\x1b[0m Unknown command: ${cmd}`);
 			Deno.exit(1);
+		}
 	}
 }
 
