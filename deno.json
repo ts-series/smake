@@ -4,6 +4,10 @@
 	"author": "Enrico Rippin <e@rippin.org>",
 	"description": "A lightweight CLI tool for automated generation of SQLite databases from multiple source files.",
 	"license": "Unlicense",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/ts-series/smake.git"
+	},
 	"exports": "./src/cli.ts",
 	"compilerOptions": {
 		"strict": true

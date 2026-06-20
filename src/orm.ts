@@ -345,15 +345,13 @@ export function exportTypes(customTypes: CustomTypes, orm: Orm): TypesMap {
 		return {};
 	}
 	else {
-		const [code, typesMap] = generateTypes(customTypes, orm);
-		const moduleName = basename(orm.definitionsPath);
-		const dir = resolvePath(join(orm.directory, dirname(orm.definitionsPath)));
-
+		const defPath = orm.definitionsPath ?? join(orm.directory, "definitions.ts");
+		const dir = resolvePath(dirname(defPath));
 		ensureDirSync(dir);
+		console.log(`Export ORM types module »${basename(defPath)}« to ${bold(dir)}`);
 
-		console.log(`Export ORM types module »${moduleName}« to ${bold(dir)}`);
-		Deno.writeTextFileSync(join(dir, moduleName), code, ExportOptions);
-
+		const [code, typesMap] = generateTypes(customTypes, orm);
+		Deno.writeTextFileSync(defPath, code, ExportOptions);
 		return typesMap
 	}
 }

@@ -109,7 +109,7 @@ const OrmSchema = z.object({
 	zodPath: z.string().optional(),
 		// Path to the validation library for imports, with currently only Zod being supported.
 		// If the specification is missing, no validation schemas are generated.
-	definitionsPath: z.string().default("./definitions.ts"),
+	definitionsPath: z.string().optional(),
 		// Relative path from the ORM directory to the type definitions module.
 	indent: z.union([z.number().min(1).max(8), z.string()]).default(1),
 		// Indentation depth, where 1 is understood as a tab stop.
