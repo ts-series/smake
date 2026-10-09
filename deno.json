@@ -1,7 +1,6 @@
 {
 	"name": "@ts-series/smake",
-	"version": "2.1.0",
-	"author": "Enrico Rippin <e@rippin.org>",
+	"version": "2.2.0",
 	"description": "A lightweight CLI tool for automated generation of SQLite databases from multiple source files.",
 	"license": "Unlicense",
 	"repository": {

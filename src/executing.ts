@@ -65,32 +65,49 @@ export async function createBuilds(
 		}
 
 		// 1 Prepare database and establish a connection:
-		if (build.source) {
-			if (release) {
-				console.log(`Open existing production database ${dbPathDisplay}`);
+		if (build.source && release) {
+			console.log(`Open existing production database ${dbPathDisplay}`);
+		}
+		else if (build.source) {
+			const basePath = resolvePath(build.source);
+			if (basePath === targetPath) {
+				console.warn(WarningDisplay(`base and destination are the same path, skipping: ${dbPathDisplay}`));
+				continue;
 			}
-			else {
-				const basePath = resolvePath(build.source);
-				if (basePath === targetPath) {
-					console.warn(WarningDisplay(`base and destination are the same path, skipping: ${dbPathDisplay}`));
-					continue;
-				}
-				Deno.copyFileSync(basePath, targetPath);
-				console.log(`Copy ${getPathDisplay(basePath)} to ${dbPathDisplay}`);
+
+			removeDatabase(targetPath);
+
+			const source = new Database(basePath, { readonly: true });
+			try {
+				source.exec("vacuum into ?", targetPath);
+					// Unlike a file copy, includes uncheckpointed WAL content and yields a consistent snapshot without modifying the source.
 			}
+			finally {
+				source.close();
+			}
+
+			console.log(`Copy ${getPathDisplay(basePath)} to ${dbPathDisplay}`);
 		}
 		else {
-			try {
-				Deno.removeSync(targetPath);
-				console.log(red(`Remove existing database ${dbPathDisplay}`));
-			}
-			catch { /* not found */ }
+			removeDatabase(targetPath);
 		}
 
 		const db = new Database(targetPath);
-		const strict = build.strict ?? config.strict ?? true;
+		
+		const pragmas: Record<string, string | number | boolean | undefined> = {
+			foreign_keys: true,
+			...config.pragmas,
+			...build.pragmas
+		};
 
-		if (strict) db.exec("PRAGMA foreign_keys = ON;");
+		for (const [key, val] of Object.entries(pragmas)) {
+			if (val !== undefined) {
+				const out = typeof val === "boolean" ? (val ? "on" : "off") : val;
+				db.exec(`pragma ${key} = ${out};`);
+				console.log(`Set pragma ${key} = ${out} for database ${dbPathDisplay}`);
+			}
+		}
+
 		if (build.functions) await registerFunctions(db, build.functions.map(resolvePath));
 
 		// 2 Create additional metatables as needed and import column annotations:
@@ -148,6 +165,21 @@ function backupDatabase(targetPath: string, backupDirectory: string | undefined)
 			console.log(grey(`No existing production database to back up at ${getPathDisplay(targetPath)}`));
 		}
 		else throw e;
+	}
+}
+
+
+/** Removes a database file along with its WAL, shared-memory and journal side files, ignoring missing ones. */
+function removeDatabase(targetPath: string): void {
+	for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+		const path = targetPath + suffix;
+		try {
+			Deno.removeSync(path);
+			console.log(red(`Remove ${getPathDisplay(path)}`));
+		}
+		catch (e) {
+			if (!(e instanceof Deno.errors.NotFound)) throw e;
+		}
 	}
 }
 

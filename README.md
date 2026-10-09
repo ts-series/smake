@@ -2,9 +2,10 @@
 
 Inspired by psql, SMake is a command-line utility that assembles SQLite databases from various SQL sources, injects domain-derived check constraints, and automatically derives a TypeScript ORM layer from the final schema. Unlike alternatives built on complex migration workflows, custom configuration languages, or rigid folder hierarchies, SMake orchestrates everything through a single, straightforward JSON file.
 
+
 ## Outline of Functionalities
 
-SMake manages configurations for any number of SQLite databases through a central [JSON file](https://github.com/ts-series/smake/blob/main/REFERENCE.md#2-build-configuration), executing listed SQL scripts in sequence according to specified parameters, such as enforcing foreign key constraints or modifying existing databases. Should an issue arise, SMake displays the error message alongside the precise line range of the problematic statement:
+SMake manages configurations for any number of SQLite databases through a central [JSON file](https://github.com/ts-series/smake/blob/main/REFERENCE.md#2-build-configuration), executing listed SQL scripts in sequence according to specified parameters, such as PRAGMA settings or modifying existing databases. Should an issue arise, SMake displays the error message alongside the precise line range of the problematic statement:
 
 ```
 $ smake 
@@ -32,7 +33,7 @@ Execute portfolio.sql on ../../../../.local/share/…/portfolio.db
 
 SQL scripts can also call user-defined functions implemented in TypeScript, as well as a set of built-in functions for common tasks such as reading files or converting timestamps.
 
-Optionally, SMake extracts metadata from built databases and generates TypeScript ORM classes from them, including type definitions and Zod validation schemas derived from the same source, targeting [Lite.ts](https://github.com/ts-series/lite), a lightweight, connector-agnostic ORM for SQLite.
+Optionally, SMake extracts metadata from built databases and generates TypeScript ORM classes from them, including type definitions and Zod validation schemas derived from the same source, targeting [LiteClient.ts](https://github.com/ts-series/lite-client), a lightweight, connector-agnostic ORM for SQLite.
 
 ### Automated Constraint Injection
 
@@ -47,6 +48,7 @@ create table Entity (
 SMake resolves custom types to their real affinities for valid final SQL, while the Risk definition itself lives in a separate domain JSON file. For details on domain definitions, see [Typing](https://github.com/ts-series/smake/blob/main/REFERENCE.md#4-typing) in the reference documentation.
 
 Additionally, the generated ORM utilizes these same definitions to synchronize type definitions and Zod schemas in TypeScript with the database constraints, providing a unified source of truth for both the persistence and application layers.
+
 
 ## Installation
 
@@ -108,6 +110,7 @@ The resulting binary bundles all dependencies and can be placed anywhere on your
 deno task install
 ```
 
+
 ## Usage
 
 The usage is similar to `make`, in that the entire program input is taken from a local JSON file:
@@ -116,7 +119,9 @@ The usage is similar to `make`, in that the entire program input is taken from a
 {
     "databases": {
         "out/example.db": {
-            "strict": true,
+            "pragmas": {
+                "foreign_keys": true
+            },
             "scripts": ["example.sql"]
         }
     }
@@ -134,6 +139,12 @@ smake example
 ```
 
 Full documentation is available in [REFERENCE.md](https://github.com/ts-series/smake/blob/main/REFERENCE.md).
+
+
+## Changelog
+
+See [CHANGELOG.md](https://github.com/ts-series/smake/blob/main/CHANGELOG.md) for a history of changes across versions.
+
 
 ## License
 

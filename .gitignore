@@ -1,11 +1,18 @@
-.deno/
-.env
-.vscode/
 bin/
-deno.lock
+
+# HIDDEN SOURCE FILES
+.*.ts
 
 # DATABASE FILES
 *.db*
+
+# ENVIRONMENT
+.env
+.env.*
+
+# TOOLS
+.deno/
+.vscode/
 
 # GENERATED TEST DATA
 test/*

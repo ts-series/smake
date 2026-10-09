@@ -3,12 +3,19 @@ import { parseArgs } from "std/cli/parse-args"
 
 import { ExampleBuild, ExampleSql, Help } from "./templates.ts";
 import { createBuilds, regenerateOrm } from "./executing.ts";
-import { readConfig } from "./preparing.ts";
+import { finalizeOrm, OrmSchema, readConfig, resolvePath } from "./preparing.ts";
 
 
 //
 
 const Version = "2.1";
+
+
+const args = parseArgs(Deno.args, {
+	boolean: ["help", "version"],
+	string: ["lib", "indent"],
+	alias: { h: "help", v: "version" },
+});
 
 
 /** Entry point: dispatches CLI subcommands or runs the default build. */
@@ -39,7 +46,39 @@ async function program(): Promise<void> {
 			break;
 		}
 		case "orm": {
-			regenerateOrm(readConfig());
+			if (args._.length === 1) {
+				regenerateOrm(readConfig());
+			}
+			else if (args._.length === 3) {
+				let indent: number | string | undefined;
+
+				if (args.indent === undefined) {
+					indent = undefined;
+				}
+				else if (/^\d+$/.test(String(args.indent))) {
+					indent = Number(args.indent);
+				}
+				else {
+					indent = String(args.indent);
+				}
+
+				const orm = OrmSchema.parse({
+					directory: String(args._[2]),
+					libraryImport: args.lib === undefined ? undefined : String(args.lib),
+					indent
+				});
+
+				finalizeOrm(orm);
+				
+				regenerateOrm({
+					orm,
+					databases: new Map([[resolvePath(String(args._[1])), { scripts: [], functions: [], backup: true }]])
+				});
+			}
+			else {
+				console.error(`\x1b[91m[ERROR]\x1b[0m Usage: smake orm [<db path> <orm dir> [--lib <import>] [--indent <n|string>]]`);
+				Deno.exit(1);
+			}
 			break;
 		}
 		case "release": {

@@ -101,16 +101,19 @@ export const NamingConventionSchema = z.enum(NamingConventionValues);
 
 
 /** All settings for automatic ORM generation. */
-const OrmSchema = z.object({
+export const OrmSchema = z.object({
 	directory: z.string(),
 		// Target directory where the generated TS module should be stored.
-	libraryPath: z.string().optional(),
-		// Path or name under which the ORM library Lite.ts is imported.
-	zodPath: z.string().optional(),
-		// Path to the validation library for imports, with currently only Zod being supported.
+	libraryImport: z.string().optional(),
+		// Path or alias under which the ORM library Lite.ts is imported.
+	validatorImport: z.string().optional(),
+		// Path or alias under which the validation library is imported, with currently only Zod being supported.
 		// If the specification is missing, no validation schemas are generated.
 	definitionsPath: z.string().optional(),
-		// Relative path from the ORM directory to the type definitions module.
+		// Target path where the definitions module should be written by SMake.
+	definitionsImport: z.string().optional(),
+		// Import specifier under which the definitions module is referenced in generated code.
+		// Defaults to a relative import derived from 'definitionsOutput' if omitted.
 	indent: z.union([z.number().min(1).max(8), z.string()]).default(1),
 		// Indentation depth, where 1 is understood as a tab stop.
 	tableNaming: NamingConventionSchema.default("PascalCase"),
@@ -120,11 +123,31 @@ const OrmSchema = z.object({
 		// null: Name unchanged, as in the JSON file.
 	strippedSuffixes : z.array(z.string()).optional().transform(s => s?.map(v => v.toLowerCase())),
 		// Are there specific endings to column names that should be removed in the ORM?
-	includingViews: z.boolean()
+	includingViews: z.boolean().default(true),
 		// Should SQL views also be implemented as table classes?
+	useSafeIntegers: z.boolean().default(false)
+		// Should columns with INTEGER affinity be typed as bigint in the ORM? The database driver must then return bigint, too.
 });
 
 export type Orm = z.infer<typeof OrmSchema>;
+
+
+const PragmasSchema = z.object({
+	foreign_keys: z.boolean().optional(),
+		// Should foreign key constraints be enabled?
+	journal_mode: z.enum(["delete", "truncate", "persist", "memory", "wal", "off"]).optional(),
+		// Journal mode to set once during creation; persisted in the file header.
+	application_id: z.number().int().optional(),
+		// Magic number identifying the file format, written once during creation.
+	user_version: z.number().int().optional(),
+		// Application-defined schema version counter, written once during creation.
+	page_size: z.number().int().optional(),
+		// Page size in bytes, must be set before the first table is created.
+	encoding: z.enum(["UTF-8", "UTF-16", "UTF-16le", "UTF-16be"]).optional(),
+		// Text encoding, must be set before the first table is created.
+	auto_vacuum: z.enum(["none", "full", "incremental"]).optional()
+		// Auto-vacuum mode, must be set before the first table is created (except NONE↔INCREMENTAL toggling requires VACUUM)
+});
 
 
 const BuildSchema = z.object({
@@ -132,11 +155,11 @@ const BuildSchema = z.object({
 		// Name of the DB for cross-database joins.
 	source: z.string().optional(),
 		// Path to an existing database to be copied and modified.
-	strict: z.boolean().optional(),
-		// Should foreign key constraints be enabled? Falls back to the global setting, then to true.
+	pragmas: PragmasSchema.optional(),
+		// PRAGMA statements to apply during creation.
 	functions: z.array(z.string()).optional().default([]),
 		// TypeScript modules containing custom functions to be available in SQLite during SMake creation.
-	scripts: z.array(z.string()),
+	scripts: z.array(z.string()).default([]),
 		// List of source files executed sequentially on this database.
 	ormTypes: z.record(z.string(), z.record(z.string(), z.string())).optional(),
 		// Custom types that only exist in the ORM without constraint injections and take precedence over specifications in the SQL code.
@@ -158,8 +181,8 @@ const ConfigSchema = z.object({
 		// Path to a JSON file where custom types are precisely specified, from which check constraints and TS types are generated.
 	orm: OrmSchema.optional(),
 		// Specifications for generating the ORM.
-	strict: z.boolean().optional(),
-		// Global default for whether foreign key constraints are enabled, overridable per database.
+	pragmas: PragmasSchema.optional(),
+		// Global PRAGMA defaults applied to every build, overridden per-build.
 	directory: z.string().optional(),
 		// If set, every database key resolves relative to this directory instead of being an absolute path itself.
 	databases: z.record(z.string(), BuildSchema)
@@ -177,11 +200,23 @@ export type Config = Omit<z.infer<typeof ConfigSchema>, "databases"> & {
 
 /** Resolve a config path string to an absolute file path. */
 export function resolvePath(key: string): string {
-	if (key.startsWith("~")) {
-		const home = Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? "";
-		return key.replace("~", home);
-	}
-	return resolve(Deno.cwd(), key);
+	return key.startsWith("~")
+		? key.replace("~", Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? "")
+		: resolve(Deno.cwd(), key);
+}
+
+
+/** Resolves directory, definitions path and indentation of an ORM configuration in place. */
+export function finalizeOrm(orm: Orm): void {
+	orm.directory = resolvePath(orm.directory);
+	orm.definitionsPath = orm.definitionsPath
+		? resolvePath(orm.definitionsPath)
+		: join(orm.directory, "./definitions.ts");
+	orm.indent = typeof orm.indent === "string"
+		? orm.indent
+		: orm.indent === 1
+			? "\t"
+			: " ".repeat(orm.indent);
 }
 
 
@@ -233,18 +268,15 @@ export function readConfig(): Config {
 	
 		Deno.exit(1);
 	}
-
-	const databases: Builds = new Map();
-	for (const [key, val] of Object.entries(result.data.databases)) {
-		databases.set(resolvePath(result.data.directory ? join(result.data.directory, key) : key), val);
+	else {
+		const databases: Builds = new Map();
+		for (const [key, val] of Object.entries(result.data.databases)) {
+			databases.set(resolvePath(result.data.directory ? join(result.data.directory, key) : key), val);
+		}
+		
+		if (result.data.orm) finalizeOrm(result.data.orm);
+	
+		return { ...result.data, databases };
 	}
-
-	if (result.data.orm) result.data.orm.indent = resolveIndent(result.data.orm.indent);
-
-	return { ...result.data, databases };
 }
 
-
-function resolveIndent(value: number | string): string {
-	return typeof value === "string" ? value : value === 1 ? "\t" : " ".repeat(value);
-}
